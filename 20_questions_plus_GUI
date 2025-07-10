@@ -1,0 +1,154 @@
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import torch
+import tkinter as tk
+from tkinter import scrolledtext, END
+
+
+class TwentyQuestionsAI:
+    def __init__(self):
+        print("Loading the AI model... this might take a moment.")
+
+
+
+
+        # Load the model and tokenizer from Hugging Face
+        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.model = GPT2LMHeadModel.from_pretrained("gpt2")
+
+        # Fix a technical issue with the tokenizer
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        print("AI model loaded successfully!")
+
+        # Game variables
+        self.questions_asked = 0
+        self.max_questions = 20
+        self.category = ""
+
+    # Function to show initial greeting
+    def start_game(self):
+
+        print("\n=== Welcome to 20 Questions! ===")
+        print("Think of a person, place, or thing.")
+        print("I'll try to guess it by asking yes/no questions.")
+
+        # Get the category hint
+        self.category = input("\nIs it a person, place, or thing? ").lower().strip()
+
+        print(f"\nOkay! I'll try to guess your {self.category}.")
+        print("Please answer my questions with 'yes' or 'no'.\n")
+
+        # Now start asking questions
+        self.ask_questions()
+
+    def ask_questions(self):
+        while self.questions_asked < self.max_questions:
+            # Generate a question using the AI
+            question = self.generate_question()
+            print(f"Question {self.questions_asked + 1}: {question}")
+
+            # Get player's answer
+            answer = input("Your answer: ").lower().strip()
+
+            self.questions_asked += 1
+
+            if answer == "yes":
+                print("Interesting!\n")
+            elif answer == "no":
+                print("I see.\n")
+
+    def generate_question(self):
+        # Create a prompt to help the AI generate a good question
+        prompt = f"I'm playing 20 questions. I need to guess a {self.category}. "
+        prompt += f"Question {self.questions_asked + 1}: Is it"
+
+        # Convert text to numbers the AI understands
+        inputs = self.tokenizer.encode(prompt, return_tensors="pt")
+
+        # Generate text using the AI model
+        with torch.no_grad():
+            outputs = self.model.generate(
+                inputs,
+                max_length=inputs.shape[1] + 10,
+                num_return_sequences=1,
+                temperature=0.7,
+                do_sample=True,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+
+        # Convert the AI's numbers back to text
+        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Extract just the question part
+        question = generated_text.replace(prompt, "").strip()
+
+        # Clean up and make sure it ends with a question mark
+        if not question.endswith("?"):
+            question += "?"
+
+        return "Is it " + question
+
+def get_chatbot_response(input_text):
+    openai.api_key = os.environ[""] #secret key
+    response = openai.Completion.create(
+        engine="text-davinci-002",
+        prompt=input_text,
+        temperature=0.7,
+        max_tokens=150,
+        n=1,
+        stop=None,
+    )
+    return response.choices[0].text.strip()
+
+# Function to display the chatbot response in the GUI
+def show_chatbot_response():
+    user_input = user_input_box.get("1.0", END).strip()
+    user_input_box.delete("1.0", END)
+
+    if user_input.lower() in ["exit", "quit", "bye"]:
+        chat_log.insert(tk.END, "Chatbot: Goodbye!\n")
+        return
+
+    chat_log.insert(tk.END, "You: " + user_input + "\n")
+    chatbot_response = get_chatbot_response(user_input)
+    chat_log.insert(tk.END, "Chatbot: " + chatbot_response + "\n")
+
+
+# Create main window
+root = tk.Tk()
+root.title("The 20 Questions Game")
+
+# Chat log
+chat_window = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=60, height=20, font=("Arial", 12))
+chat_window.pack(padx=10, pady=10)
+
+user_entry = tk.Entry(root, width=60, font=("Arial", 12))
+user_entry.pack(padx=10, pady=(0,10))
+user_entry.bind("<Return>", lambda event: send_message())
+
+send_button = tk.Button(root, text="Send", command=send_message, font=("Arial", 12))
+send_button.pack()
+
+# Run GUI
+root.mainloop()
+
+# Chat log
+#chat_log = scrolledtext.ScrolledText(root, width=60, height=20, wrap=tk.WORD)
+#chat_log.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
+
+# User input box
+#user_input_box = scrolledtext.ScrolledText(root, width=40, height=4, wrap=tk.WORD)
+#user_input_box.grid(row=1, column=0, padx=10, pady=10)
+
+# Send button
+#send_button = tk.Button(root, text="Send", command=show_chatbot_response)
+#send_button.grid(row=1, column=1, padx=10, pady=10)
+
+
+
+# Run the game
+if __name__ == "__main__":
+    # Start the GUI event loop
+    root.mainloop()
+    game = TwentyQuestionsAI()
+    game.start_game()
