@@ -1,0 +1,186 @@
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import torch
+import tkinter as tk
+from tkinter import scrolledtext, END
+
+chat_window = tk.Tk()
+
+class TwentyQuestionsAI:
+    def __init__(self, chat_display):
+        self.chat_display = chat_display
+        print("testing")
+        self.chat_display.config(state=tk.NORMAL)
+        self.chat_display.insert(END,"Loading the AI model... this might take a moment.")
+
+        print("round 2")
+
+
+        # Load the model and tokenizer from Hugging Face
+        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.model = GPT2LMHeadModel.from_pretrained("gpt2")
+
+        # Fix a technical issue with the tokenizer
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.chat_display.insert(END,"AI model loaded successfully!")
+        self.chat_display.config(state=tk.DISABLED)
+        # Game variables
+        self.questions_asked = 0
+        self.max_questions = 20
+        self.category = ""
+
+    # Function to show initial greeting
+    def start_game(self):
+        self.chat_display.config(state=tk.NORMAL)
+        self.chat_display.insert(END,"\n=== Welcome to 20 Questions! ===")
+        self.chat_display.insert(END,"Think of a person, place, or thing.")
+        self.chat_display.insert(END,"I'll try to guess it by asking yes/no questions.")
+
+        # Get the category hint
+
+        #self.category = chat_window.insert(END,"\nIs it a person, place, or thing? ").lower().strip()
+        #
+        self.chat_display.insert(END,f"\nOkay! I'll try to guess your {self.category}.")
+        self.chat_display.insert(END,"Please answer my questions with 'yes' or 'no'.\n")
+        self.chat_display.insert(END, "\nIs it a person, place, or thing? ")
+        self.chat_display.config(state=tk.DISABLED)
+        #Now start asking questions
+        self.ask_questions()
+
+    def ask_questions(self):
+        self.chat_display.config(state=tk.NORMAL)
+        while self.questions_asked < self.max_questions:
+            # Generate a question using the AI
+            question = self.generate_question()
+            self.chat_display.insert(END,f"Question {self.questions_asked + 1}: {question}")
+
+            # Get player's answer
+            user_input = user_entry.get().strip()
+            self.chat_display.insert(END,f"Your answer: {user_input}")
+
+            self.questions_asked += 1
+
+            if answer == "yes":
+                self.chat_display.insert(END,"Interesting!\n")
+            elif answer == "no":
+                self.chat_display.insert(END,"I see.\n")
+            self.chat_display.config(state=tk.DISABLED)
+    def generate_question(self):
+
+        # Create a prompt to help the AI generate a good question
+        prompt = f"I'm playing 20 questions. I need to guess a {self.category}. "
+        prompt += f"Question {self.questions_asked + 1}: Is it"
+
+        # Convert text to numbers the AI understands
+        inputs = self.tokenizer.encode(prompt, return_tensors="pt")
+
+        # Generate text using the AI model
+        with torch.no_grad():
+            outputs = self.model.generate(
+                inputs,
+                max_length=inputs.shape[1] + 10,
+                num_return_sequences=1,
+                temperature=0.7,
+                do_sample=True,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+
+        # Convert the AI's numbers back to text
+        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Extract just the question part
+        question = generated_text.replace(prompt, "").strip()
+
+        # Clean up and make sure it ends with a question mark
+        if not question.endswith("?"):
+            question += "?"
+
+        return "Is it " + question
+
+
+# Function to launch the main menu window
+def start_game_initial():
+    # Close chat window if it exists
+    if 'chat_window' in globals() and chat_window.winfo_exists():
+        chat_window.destroy()
+
+    # Create new main menu window
+    global main_menu
+    main_menu = tk.Tk()
+    main_menu.title("Game Menu")
+    main_menu.geometry("300x200")
+
+    # Title label
+    title_label = tk.Label(main_menu, text="Welcome to the Game", font=("Helvetica", 16))
+    title_label.pack(pady=20)
+
+    # Start Game button
+    start_button = tk.Button(main_menu, text="Start Game", font=("Helvetica", 12),
+                             command=lambda: launch_chat_window(main_menu))
+    start_button.pack(pady=10)
+
+    # Quit button
+    quit_button = tk.Button(main_menu, text="Quit", font=("Helvetica", 12), command=main_menu.destroy)
+    quit_button.pack(pady=10)
+
+    main_menu.mainloop()
+
+
+# Function to launch the chat window
+def launch_chat_window(previous_window):
+    previous_window.destroy()  # Close previous window
+
+    global chat_window
+    chat_window = tk.Tk()
+    chat_window.title("The 20 Questions Game")
+    chat_window.geometry("600x500")
+
+    # Chat display
+    chat_display = scrolledtext.ScrolledText(chat_window, wrap=tk.WORD, width=60, height=20, font=("Arial", 12))
+    chat_display.pack(padx=10, pady=10)
+    chat_display.insert(END, "Welcome to the 20 Questions Game!\n")
+    chat_display.config(state=tk.DISABLED)
+
+    # User input
+    user_entry = tk.Entry(chat_window, width=60, font=("Arial", 12))
+    user_entry.pack(padx=10, pady=(0, 10))
+
+    def show_chatbot_response(event=None):
+
+        user_input = user_entry.get().strip()
+        if user_input:
+            chat_display.config(state=tk.NORMAL)
+            chat_display.insert(END, f"You: {user_input}\n")
+            chat_display.insert(END, f"Bot: I heard you say '{user_input}'\n")
+            chat_display.config(state=tk.DISABLED)
+            chat_display.yview(END)
+            user_entry.delete(0, END)
+
+    user_entry.bind("<Return>", show_chatbot_response)
+
+    # Send button
+    send_button = tk.Button(chat_window, text="Send", command=show_chatbot_response, font=("Arial", 12))
+    send_button.pack(pady=5)
+
+    # Quit Game button (returns to menu)
+    quit_button = tk.Button(chat_window, text="Quit Game", command=lambda: start_game_initial(),
+                            font=("Arial", 12))
+    quit_button.pack(pady=10)
+
+    # Start the game logic
+    game = TwentyQuestionsAI(chat_display)
+    game.start_game()
+
+    chat_window.mainloop()
+
+
+# Function to return to main menu
+def restart_to_menu(current_window):
+    current_window.destroy()
+    start_game_initial()
+
+
+# Run the full app
+if __name__ == "__main__":
+    start_game_initial()
+#-----------------------------------------------------
