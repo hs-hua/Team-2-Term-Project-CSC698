@@ -1,0 +1,451 @@
+# pip install hugging_face[hf_xet] in cmd line
+# install hf_xet package in Pycharm
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+import torch
+import tkinter as tk
+from tkinter import scrolledtext, END, messagebox
+import random
+import os
+
+# === Sample fallback questions ===
+sample_questions = [
+    "Is it a living thing?", "Is it something you can eat?", "Is it an object?",
+    "Is it a place?", "Is it something you can buy?", "Is it bigger than a loaf of bread?",
+    "Is it used daily?", "Is it found indoors?", "Is it made by humans?",
+    "Is it a proper noun?", "Does it have more than one syllable?", "Is it something you wear?",
+    "Can it be found in nature?", "Is it something that makes noise?", "Is it a feeling or emotion?",
+    "Is it something you use with your hands?", "Is it electronic?", "Is it found in a school?",
+    "Is it part of your body?", "Is it related to technology?"
+]
+random.shuffle(sample_questions)
+
+# Category-specific fallback questions
+fallback_questions = {
+    "person": [
+        "Are they known for their work in entertainment?",
+        "Are they from the current century?",
+        "Are they associated with a particular country?",
+        "Are they known for their achievements in sports?",
+        "Are they a political figure?",
+        "Are they known for their artistic work?",
+        "Are they associated with a particular time period?",
+        "Are they known for their scientific contributions?",
+        "Are they considered a historical figure?",
+        "Are they known for their humanitarian work?"
+    ],
+    "place": [
+        "Is it located in a major city?",
+        "Is it a tourist destination?",
+        "Is it associated with a particular culture?",
+        "Is it a place where people work?",
+        "Is it accessible to the public?",
+        "Is it known for its historical significance?",
+        "Is it associated with nature or wildlife?",
+        "Is it a place where events are held?",
+        "Is it known for a particular activity?",
+        "Is it considered a landmark?"
+    ],
+    "thing": [
+        "Is it used for work or business?",
+        "Is it found in a typical home?",
+        "Is it related to entertainment or sports?",
+        "Is it something you interact with daily?",
+        "Is it valuable or expensive?",
+        "Is it related to food or cooking?",
+        "Is it used for transportation?",
+        "Is it educational or informational?",
+        "Is it decorative or artistic?",
+        "Is it related to technology?",
+        "Is it made out of wood?"
+    ]
+}
+
+# === Word History Tracking ===
+used_words = []
+
+def reveal_locked_word():
+    try:
+        with open("locked_word.txt", "r") as f:
+            word = f.read().strip().lower()
+            if word not in used_words:
+                used_words.append(word)
+            return word
+    except FileNotFoundError:
+        return None
+
+def check_final_guess(guess):
+    locked = reveal_locked_word()
+    if locked:
+        return guess.lower().strip("? .") == locked
+    return False
+
+def show_used_words():
+    word_window = tk.Toplevel()
+    word_window.title("Words Used So Far")
+    word_window.geometry("300x300")
+    word_list_display = tk.Text(word_window, wrap=tk.WORD, font=("Arial", 12))
+    word_list_display.pack(expand=True, fill="both")
+
+    if used_words:
+        word_list_display.insert(END, "\n".join(used_words))
+    else:
+        word_list_display.insert(END, "No words have been used yet.")
+
+    word_list_display.config(state=tk.DISABLED)
+
+# === Strategic Question Generator ===
+def is_duplicate_question(question, asked_questions):
+    return any(q.lower().strip("?") == question.lower().strip("?" ) for q in asked_questions)
+
+def generate_strategic_question(model, tokenizer, history, question_number, asked_questions, category):
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        prompt = f"""You are playing 20 Questions. The goal is to identify a secret {category} that the user is thinking of. Ask a clever yes/no question that will help narrow down possibilities.
+                 Important rules:
+                - Do NOT ask about strategy, how to win, or how to play the game.
+                - Ask ONLY yes/no questions about the {category} itself.
+                - Avoid repeating earlier questions.
+                - Avoid abstract or philosophical questions.
+                - Be specific and practical (e.g., "Is it alive?", "Is it man-made?", etc.)
+
+                Examples of good questions:
+                if the category is a "thing"
+                - Is it a living thing?
+                - Is it man-made?
+                - Is it found indoors?
+                - Is it used for entertainment?
+                - Is it something you can eat? 
+                - Is it something you can buy?
+                - Is it bigger than a loaf of bread?
+                - Is it used daily?
+                - Is it found indoors?
+                - Is it made by humans?
+                - Can it be found in nature?
+                - Is it something you use with your hands?
+                - Is it found in a school?
+                - is it an emotion or non-physical object?
+
+                if it is a "place" or "person" do NOT use the above questions, as they are not relevant.
+
+                if it is a place:
+                Examples of good first questions, or good questions in general might be:
+                - is it a place in nature?
+                - is it man-made?
+                - is it a country?
+                - is it a city?
+                - is it a continent?
+                - is it in one of the seven continents?
+                - is it in Africa
+                - is it in America
+                - is it in Asia
+                - is it in Europe
+                - is it in North America
+                - is it in South America
+                - is it in Southeast Asia
+                - is it in Western Europe
+                - is it in Western Australia
+                - is it in Western South Australia
+                - is it in Southeast Asia
+                - is it in Southeast Australia
+                - is it in Europe
+                - is it a place people frequent?
+
+        Make sure your guess is a real and specific {category} (e.g., not "an important thing", but something like "a smartphone", "a pineapple", "Albert Einstein", "the Eiffel Tower", etc).
+
+    Game history:
+
+{history}
+Previously asked questions:
+{chr(10).join(f"- {q}" for q in asked_questions[-5:])}
+Ask a DIFFERENT strategic yes/no question about this {category}:"""
+
+        inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        input_ids = inputs["input_ids"]
+        attention_mask = inputs["attention_mask"]
+
+        with torch.no_grad():
+            output_ids = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,  # FIX: pass the attention mask
+                max_length=input_ids.shape[1] + 30,
+                num_beams=2,
+                early_stopping=True,
+                do_sample=True,
+                temperature=0.8 + (attempt * 0.2),
+                top_p=0.9,
+                pad_token_id=tokenizer.eos_token_id
+            )
+
+        question = tokenizer.decode(output_ids[0], skip_special_tokens=True).replace(prompt, "").strip()
+
+        if ':' in question:
+            question = question.split(':', 1)[-1].strip()
+        if not question.endswith('?'):
+            question += '?'
+
+        if not is_duplicate_question(question, asked_questions):
+            return question
+
+    combined_fallbacks = sample_questions + fallback_questions.get(category, [])
+    random.shuffle(combined_fallbacks)
+    for sample in combined_fallbacks:
+        if not is_duplicate_question(sample, asked_questions):
+            return sample
+
+    return "Is it something commonly known?"
+
+# === Main Menu ===
+def start_game_initial():
+    global main_menu
+    main_menu = tk.Tk()
+    main_menu.title("Game Menu")
+    main_menu.geometry("300x250")
+
+    title_label = tk.Label(main_menu, text="Welcome to the Game", font=("Helvetica", 16))
+    title_label.pack(pady=20)
+
+    start_button = tk.Button(main_menu, text="Start Game", font=("Helvetica", 12), command=lambda: launch_chat_window(main_menu))
+    start_button.pack(pady=10)
+
+    word_history_button = tk.Button(main_menu, text="View Used Words", font=("Helvetica", 12), command=show_used_words)
+    word_history_button.pack(pady=10)
+
+    quit_button = tk.Button(main_menu, text="Quit", font=("Helvetica", 12), command=main_menu.destroy)
+    quit_button.pack(pady=10)
+
+    main_menu.mainloop()
+
+# === Game Class and Launch Logic ===
+class TwentyQuestionsAI:
+    def __init__(self, chat_display, user_entry):
+        self.chat_display = chat_display
+        self.user_entry = user_entry
+        self.reset_game_state()
+        self.model_name = "google/flan-t5-large"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+        self.state = "prompt_play"
+        self.total_games = 0
+        self.total_questions = 0
+        self.total_guesses = 0
+        self.awaiting_guess_feedback = False
+
+        print("Loading AI model... please wait.\n")
+
+    def reset_game_state(self):
+        self.awaiting_guess_feedback = False
+        self.questions_asked = 0
+        self.max_questions = 20
+        self.category = ""
+        self.state = "prompt_play"
+        self.qa_history = []
+        self.asked_questions = []
+        self.guesses_made = 0
+
+    def start_game(self):
+        self.reset_game_state()
+        self.chat_display.config(state=tk.NORMAL)
+        print("FLAN-T5 model loaded successfully!\n")
+        self.chat_display.insert(END, "FLAN-T5 model loaded successfully!\n")
+        self.chat_display.insert(END, "\n=== Welcome to 20 Questions! ===\n")
+        self.chat_display.insert(END, "Think of a person, place, or thing.\n")
+        self.chat_display.insert(END, "I'll ask yes/no questions to try to guess it.\n")
+        self.chat_display.insert(END, "Do you want to play a game? Type 'yes' or 'no'\n")
+        self.chat_display.config(state=tk.DISABLED)
+
+    def process_answer(self):
+        user_input = self.user_entry.get().strip().lower()
+        self.user_entry.delete(0, END)
+
+        # Always show user input in the chat window
+        self.chat_display.config(state=tk.NORMAL)
+        self.chat_display.insert(END, f"\nYou: {user_input}\n")
+
+        if self.state == "prompt_play":
+            if user_input == "yes":
+                self.chat_display.insert(END, "Okay, Great. Let's Play!\n")
+                self.state = "ask_category"
+                self.chat_display.insert(END, "First, is it a person, place, or thing?\n")
+                return
+            elif user_input == "no":
+                self.chat_display.insert(END, "Sorry to see you go! Hope you enjoyed the game!\n")
+                print("Sorry to see you go! Hope you enjoyed the game!\n")
+                self.chat_display.insert(END, "Okay, returning to main menu...\n")
+                print( "Okay, returning to main menu...\n")
+                self.chat_display.config(state=tk.DISABLED)
+                restart_to_menu(chat_window)
+                return
+            else:
+                self.chat_display.config(state=tk.NORMAL)
+                self.chat_display.insert(END, "That is not a valid entry. Please enter 'yes' or 'no'.\n")
+                self.chat_display.config(state=tk.DISABLED)
+                return
+
+
+        #     with open("locked_word.txt", "w") as f:
+        #         f.write(user_input)
+        #     self.chat_display.config(state=tk.NORMAL)
+        #     # self.chat_display.insert(END, f"Word '{user_input}' locked. Let's begin.\n")
+        #     self.chat_display.insert(END, "First, is it a person, place, or thing?\n")
+        #     self.chat_display.config(state=tk.DISABLED)
+        #     self.state = "ask_category"
+
+        if self.state == "ask_category":
+            if user_input in ["person", "place", "thing"]:
+                self.category = user_input
+                self.chat_display.insert(END,
+                                         f"Great! You're thinking of a {self.category}. Let's lock in your word...\n")
+                self.state = "get_word"
+                self.word_lockbox()
+                return
+            else:
+                self.chat_display.insert(END, "That is not a valid option, please type: person, place, or thing.\n")
+                return
+
+        elif self.state == "ask_questions":
+            if user_input not in ["yes", "no", "maybe", "i don't know"]:
+                self.chat_display.config(state=tk.NORMAL)
+                self.chat_display.insert(END, "Please answer: yes, no, maybe, or I don't know.\n")
+                self.chat_display.config(state=tk.DISABLED)
+                return
+            if self.awaiting_guess_feedback:
+                # Don't increment question count or append to history when it's just feedback on a guess
+                self.awaiting_guess_feedback = False  # Reset for next question
+                if user_input == "yes":
+                    self.chat_display.insert(END, "\nYay! I guessed it right!\n")
+                    self.state = "end"
+                    self.chat_display.insert(END, "Would you like to play again? (yes/no)\n")
+                else:
+                    # Keep playing if it's not the final guess
+                    if self.guesses_made < 3 and self.questions_asked < self.max_questions:
+                        self.ask_questions()
+                    else:
+                        self.make_guess(final=True)
+                self.chat_display.config(state=tk.DISABLED)
+                return
+
+            self.qa_history.append((self.last_question, user_input))
+            self.asked_questions.append(self.last_question)
+            self.questions_asked += 1
+
+            if self.questions_asked >= 15 and self.guesses_made < 2:
+                self.make_guess()
+            elif self.questions_asked >= self.max_questions:
+                self.make_guess(final=True)
+            else:
+                self.ask_questions()
+
+        elif self.state == "end":
+            if user_input == "yes":
+                self.start_game()
+            else:
+                self.chat_display.config(state=tk.NORMAL)
+                self.chat_display.insert(END, "\nThanks for playing!\n")
+                self.chat_display.config(state=tk.DISABLED)
+
+    def word_lockbox(self):
+        lock_window = tk.Toplevel()
+        lock_window.title("Enter Secret Word")
+        lock_window.geometry("400x150")
+
+        label = tk.Label(lock_window, text="Enter a real English word:")
+        label.pack(pady=10)
+
+        self.entry = tk.Entry(lock_window, show="*", width=30)
+        self.entry.pack()
+
+        lock_button = tk.Button(lock_window, text="Lock Word", command=lambda: self.lock_word(lock_window))
+        lock_button.pack(pady=10)
+
+    def lock_word(self, lock_box_window):
+        global locked_word
+        user_input = self.entry.get().strip().lower()
+        if not user_input:
+            self.chat_display.insert(END, "You must enter a word to continue.\n")
+            return
+        locked_word = user_input
+        with open("locked_word.txt", "w") as f:
+            f.write(user_input)
+            user_input = None
+        # self.chat_display.insert(END, f"\nYour word '{user_input}' has been locked in securely.\n")
+        self.state = "ask_questions"
+        self.chat_display.insert(END, "Okay, Great. Let's Begin!\n")
+        self.ask_questions()
+        lock_box_window.destroy()
+
+    def ask_questions(self):
+        history = "\n".join(f"Q: {q}\nA: {a}" for q, a in self.qa_history)
+        question = generate_strategic_question(self.model, self.tokenizer, history, self.questions_asked + 1, self.asked_questions, self.category)
+        self.last_question = question
+
+        self.chat_display.config(state=tk.NORMAL)
+        self.chat_display.insert(END, f"Question {self.questions_asked + 1}: {question}\n")
+        self.chat_display.config(state=tk.DISABLED)
+
+    def make_guess(self, final=False):
+        self.guesses_made += 1
+        guess = f"a famous {self.category}" if final else f"an important {self.category}"
+        self.chat_display.config(state=tk.NORMAL)
+        self.chat_display.insert(END, f"\nMy guess #{self.guesses_made}: Is it {guess}?\n")
+        self.chat_display.insert(END, "(Please answer yes or no)\n")
+        self.chat_display.config(state=tk.DISABLED)
+
+        if final or self.guesses_made >= 3:
+            self.total_games += 1
+            self.total_questions += self.questions_asked
+            self.total_guesses += self.guesses_made
+
+            correct = check_final_guess(guess)
+            self.chat_display.config(state=tk.NORMAL)
+            if correct:
+                self.chat_display.insert(END, f"\n I guessed it! It was '{guess}'.\n")
+            else:
+                actual = reveal_locked_word()
+                self.chat_display.insert(END, f"\n I couldn't guess it. Your word was: '{actual}'.\n")
+
+            self.chat_display.insert(END, f"\nGame over! Stats: {self.questions_asked} questions, {self.guesses_made} guesses.\n")
+            avg_q = self.total_questions / self.total_games
+            avg_g = self.total_guesses / self.total_games
+            self.chat_display.insert(END, f"Average so far: {avg_q:.1f} questions, {avg_g:.1f} guesses per game.\n")
+            self.chat_display.insert(END, "Would you like to play again? (yes/no)\n")
+            self.chat_display.config(state=tk.DISABLED)
+            self.state = "end"
+            self.awaiting_guess_feedback = True
+
+# Chat Window Setup
+def launch_chat_window(previous_window):
+    previous_window.destroy()
+
+    global chat_window
+    chat_window = tk.Tk()
+    chat_window.title("20 Questions Game")
+    chat_window.geometry("600x500")
+
+    chat_display = scrolledtext.ScrolledText(chat_window, wrap=tk.WORD, width=60, height=20, font=("Arial", 12))
+    chat_display.pack(padx=10, pady=10)
+    chat_display.insert(END, "Welcome to the 20 Questions Game!\n")
+
+    user_entry = tk.Entry(chat_window, width=60, font=("Arial", 12))
+    user_entry.pack(padx=10, pady=(0, 10))
+
+    game = TwentyQuestionsAI(chat_display, user_entry)
+
+    send_button = tk.Button(chat_window, text="Send", command=lambda: send_input(game), font=("Arial", 12))
+    send_button.pack(pady=5)
+
+    quit_button = tk.Button(chat_window, text="Quit Game", command=lambda: restart_to_menu(chat_window), font=("Arial", 12))
+    quit_button.pack(pady=10)
+
+    game.start_game()
+    chat_window.mainloop()
+
+def send_input(game):
+    game.process_answer()
+
+def restart_to_menu(current_window):
+    print("End of Game. Restarting...")
+    current_window.destroy()
+    start_game_initial()
+
+if __name__ == "__main__":
+    start_game_initial()
